@@ -1,0 +1,53 @@
+// This Pine Script® code is subject to the terms of the MIT License
+// https://github.com/stmastria-data/code/blob/main/LICENSE
+// © Nature Law Trading — https://naturelawtrading.com
+//
+// Name:        NLT risk library
+// Version:     0.1.0
+// Description: Reusable position-sizing and risk helpers. Publish it on TradingView, then
+//              import it in other scripts with:
+//                  import <your_username>/NLTRisk/1 as risk
+//              and call e.g. risk.positionSize(strategy.equity, 1.0, entry, stop, 1.0).
+
+//@version=6
+// @description Position sizing and risk helpers from Nature Law Trading.
+library("NLTRisk", overlay = true)
+
+// @function Units to trade so that hitting the stop loses `riskPct` % of `equity`.
+// @param equity   Account equity in account currency.
+// @param riskPct  Risk per trade in percent (1.0 = 1%).
+// @param entry    Planned entry price.
+// @param stop     Stop-loss price.
+// @param pointValue Currency value of a 1.0 price move per unit (1 for most CFDs/stocks).
+// @returns Number of units (not rounded), or na if entry equals stop.
+export positionSize(float equity, float riskPct, float entry, float stop, float pointValue) =>
+    float distance = math.abs(entry - stop) * pointValue
+    distance > 0 ? equity * riskPct / 100 / distance : na
+
+// @function Stop price `mult` ATRs away from `entry`, on the losing side of the trade.
+// @param entry  Entry price.
+// @param atr    Current ATR value.
+// @param mult   ATR multiple.
+// @param isLong true for a long position, false for a short.
+// @returns Stop price.
+export atrStop(float entry, float atr, float mult, bool isLong) =>
+    isLong ? entry - mult * atr : entry + mult * atr
+
+// @function Reward-to-risk ratio of a planned trade.
+// @param entry  Entry price.
+// @param stop   Stop-loss price.
+// @param target Take-profit price.
+// @returns Ratio of target distance to stop distance, or na if the stop distance is zero.
+export rewardRisk(float entry, float stop, float target) =>
+    float riskDist = math.abs(entry - stop)
+    riskDist > 0 ? math.abs(target - entry) / riskDist : na
+
+// @function Current drawdown of a series from its running maximum, in percent (≤ 0).
+// @param equity Equity (or price) series.
+// @returns Drawdown in percent.
+export drawdownPct(float equity) =>
+    float peak = ta.max(equity)
+    peak > 0 ? (equity / peak - 1) * 100 : na
+
+// ─── Demo when the library itself is added to a chart ─────────────────────
+plot(atrStop(close, ta.atr(14), 2.0, true), "Demo: 2 ATR long stop", color = color.red)

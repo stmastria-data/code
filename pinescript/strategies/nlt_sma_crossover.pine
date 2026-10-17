@@ -1,0 +1,72 @@
+// This Pine Script® code is subject to the terms of the MIT License
+// https://github.com/stmastria-data/code/blob/main/LICENSE
+// © Nature Law Trading — https://naturelawtrading.com
+//
+// Name:        SMA crossover with ATR stop
+// Version:     0.1.0
+// Description: Long (optionally short) when the fast SMA is above the slow SMA. Positions
+//              are protected by an ATR-based stop. Same rules as
+//              python/examples/sma_crossover.py, so results can be cross-checked.
+// Notes:       Educational example. Not financial advice. Signals are evaluated on bar
+//              close and filled on the next bar open (no look-ahead).
+
+//@version=6
+strategy("NLT · SMA crossover", shorttitle = "NLT SMAx", overlay = true,
+     initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100,
+     commission_type = strategy.commission.percent, commission_value = 0.05, slippage = 1)
+
+// ─── Inputs ────────────────────────────────────────────────────────────────
+grpRules   = "Rules"
+fastLen    = input.int(20, "Fast SMA", minval = 1, group = grpRules)
+slowLen    = input.int(50, "Slow SMA", minval = 2, group = grpRules)
+allowShort = input.bool(false, "Allow short", group = grpRules)
+
+grpRisk    = "Risk"
+atrLen     = input.int(14, "ATR length", minval = 1, group = grpRisk)
+atrMult    = input.float(3.0, "ATR stop multiple (0 = off)", minval = 0, step = 0.5, group = grpRisk)
+
+grpDate    = "Backtest window"
+startTime  = input.time(timestamp("2015-01-01"), "Start", group = grpDate)
+
+// ─── Signals ───────────────────────────────────────────────────────────────
+if fastLen >= slowLen
+    runtime.error("Fast SMA must be shorter than slow SMA")
+
+fast    = ta.sma(close, fastLen)
+slow    = ta.sma(close, slowLen)
+atr     = ta.atr(atrLen)
+inRange = time >= startTime
+
+goLong  = inRange and ta.crossover(fast, slow)
+goShort = inRange and ta.crossunder(fast, slow)
+
+// ─── Orders ────────────────────────────────────────────────────────────────
+if goLong
+    strategy.entry("Long", strategy.long)
+if goShort
+    if allowShort
+        strategy.entry("Short", strategy.short)
+    else
+        strategy.close("Long", comment = "Exit long")
+
+// ATR stop fixed at entry: computed from the ATR on the entry bar.
+var float stopLevel = na
+positionSide    = math.sign(strategy.position_size)
+positionChanged = positionSide != positionSide[1]
+if positionSide == 0
+    stopLevel := na
+else if positionChanged
+    stopLevel := positionSide > 0 ? strategy.position_avg_price - atrMult * atr : strategy.position_avg_price + atrMult * atr
+
+if atrMult > 0 and not na(stopLevel)
+    if strategy.position_size > 0
+        strategy.exit("Stop L", "Long", stop = stopLevel)
+    else if strategy.position_size < 0
+        strategy.exit("Stop S", "Short", stop = stopLevel)
+
+// ─── Plots ─────────────────────────────────────────────────────────────────
+plot(fast, "Fast SMA", color = color.teal, linewidth = 2)
+plot(slow, "Slow SMA", color = color.orange, linewidth = 2)
+plot(stopLevel, "ATR stop", color = color.red, style = plot.style_linebr)
+plotshape(goLong, "Long signal", shape.triangleup, location.belowbar, color.teal, size = size.tiny)
+plotshape(goShort, "Short/exit signal", shape.triangledown, location.abovebar, color.orange, size = size.tiny)

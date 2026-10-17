@@ -1,0 +1,50 @@
+// This Pine Script® code is subject to the terms of the MIT License
+// https://github.com/stmastria-data/code/blob/main/LICENSE
+// © Nature Law Trading — https://naturelawtrading.com
+//
+// Name:        Volatility regime
+// Version:     0.1.0
+// Description: Annualised realised volatility of log returns and its percentile rank over a
+//              long lookback, coloured as low / normal / high regime. Mirrors
+//              quanttools.indicators.rolling_volatility in the Python package.
+// Notes:       "Periods per year" must match the chart timeframe (252 daily, 52 weekly…).
+//              Leave it at 0 to estimate it from the chart timeframe automatically.
+
+//@version=6
+indicator("NLT · Volatility regime", shorttitle = "NLT Vol", overlay = false)
+
+// ─── Inputs ────────────────────────────────────────────────────────────────
+volLen   = input.int(21, "Volatility window", minval = 2)
+rankLen  = input.int(252, "Percentile lookback", minval = 20)
+ppyInput = input.int(0, "Periods per year (0 = auto)", minval = 0)
+lowPct   = input.float(20, "Low regime below percentile", minval = 0, maxval = 100)
+highPct  = input.float(80, "High regime above percentile", minval = 0, maxval = 100)
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+// Bars per year estimated from the chart timeframe, assuming 252 trading days.
+autoPeriodsPerYear() =>
+    float result = 252.0
+    if timeframe.isintraday
+        result := 252.0 * 390.0 / (timeframe.in_seconds() / 60.0)
+    else if timeframe.isweekly
+        result := 52.0
+    else if timeframe.ismonthly
+        result := 12.0
+    result
+
+// ─── Calculation ───────────────────────────────────────────────────────────
+ppy     = ppyInput > 0 ? float(ppyInput) : autoPeriodsPerYear()
+logRet  = math.log(close / close[1])
+vol     = ta.stdev(logRet, volLen) * math.sqrt(ppy) * 100
+volRank = ta.percentrank(vol, rankLen)
+
+regimeColor = volRank >= highPct ? color.red : volRank <= lowPct ? color.green : color.gray
+
+// ─── Plots ─────────────────────────────────────────────────────────────────
+plot(vol, "Annualised volatility %", color = regimeColor, linewidth = 2, style = plot.style_columns)
+plot(ta.sma(vol, rankLen), "Long-run average", color = color.orange)
+bgcolor(volRank >= highPct ? color.new(color.red, 92) : na, title = "High regime")
+
+// ─── Alerts ────────────────────────────────────────────────────────────────
+alertcondition(ta.crossover(volRank, highPct), "Entering high-vol regime", "{{ticker}} volatility regime: HIGH")
+alertcondition(ta.crossunder(volRank, lowPct), "Entering low-vol regime", "{{ticker}} volatility regime: LOW")

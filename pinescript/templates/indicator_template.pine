@@ -1,0 +1,26 @@
+// This Pine Script® code is subject to the terms of the MIT License
+// https://github.com/stmastria-data/code/blob/main/LICENSE
+// © Nature Law Trading — https://naturelawtrading.com
+//
+// Name:        <Indicator name>
+// Version:     0.1.0
+// Description: <One sentence on what the indicator measures.>
+// Inputs:      <List the main inputs and their meaning.>
+// Notes:       <Repainting behaviour, timeframe assumptions, known limits.>
+
+//@version=6
+indicator("NLT · <Indicator name>", shorttitle = "NLT <short>", overlay = false)
+
+// ─── Inputs ────────────────────────────────────────────────────────────────
+grpMain = "Main"
+src     = input.source(close, "Source", group = grpMain)
+length  = input.int(14, "Length", minval = 1, group = grpMain)
+
+// ─── Calculation ───────────────────────────────────────────────────────────
+value = ta.sma(src, length)
+
+// ─── Plots ─────────────────────────────────────────────────────────────────
+plot(value, "Value", color = color.new(color.teal, 0), linewidth = 2)
+
+// ─── Alerts ────────────────────────────────────────────────────────────────
+alertcondition(ta.crossover(src, value), "Cross up", "{{ticker}}: source crossed above value")

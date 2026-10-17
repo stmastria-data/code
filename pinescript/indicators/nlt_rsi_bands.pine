@@ -1,0 +1,48 @@
+// This Pine Script® code is subject to the terms of the MIT License
+// https://github.com/stmastria-data/code/blob/main/LICENSE
+// © Nature Law Trading — https://naturelawtrading.com
+//
+// Name:        RSI with dynamic bands
+// Version:     0.1.0
+// Description: Wilder RSI plus overbought/oversold bands that adapt to the RSI's own
+//              recent distribution (mean ± k standard deviations), with fixed 70/30 as
+//              reference. Mirrors quanttools.indicators.rsi in the Python package.
+// Notes:       Does not repaint: values are final at bar close.
+
+//@version=6
+indicator("NLT · RSI dynamic bands", shorttitle = "NLT RSI", overlay = false, precision = 2)
+
+// ─── Inputs ────────────────────────────────────────────────────────────────
+grpRsi    = "RSI"
+src       = input.source(close, "Source", group = grpRsi)
+rsiLen    = input.int(14, "RSI length", minval = 2, group = grpRsi)
+
+grpBands  = "Dynamic bands"
+bandLen   = input.int(100, "Lookback", minval = 10, group = grpBands)
+bandMult  = input.float(1.5, "Std-dev multiplier", minval = 0.1, step = 0.1, group = grpBands)
+showFixed = input.bool(true, "Show fixed 70/30 levels", group = grpBands)
+
+// ─── Calculation ───────────────────────────────────────────────────────────
+rsiValue = ta.rsi(src, rsiLen)
+mid      = ta.sma(rsiValue, bandLen)
+dev      = ta.stdev(rsiValue, bandLen)
+upper    = math.min(mid + bandMult * dev, 100)
+lower    = math.max(mid - bandMult * dev, 0)
+
+isOverbought = rsiValue > upper
+isOversold   = rsiValue < lower
+
+// ─── Plots ─────────────────────────────────────────────────────────────────
+pUpper = plot(upper, "Upper band", color = color.new(color.red, 40))
+pLower = plot(lower, "Lower band", color = color.new(color.green, 40))
+fill(pUpper, pLower, color = color.new(color.gray, 92), title = "Band fill")
+plot(mid, "Band middle", color = color.new(color.gray, 30), style = plot.style_circles)
+plot(rsiValue, "RSI", color = isOverbought ? color.red : isOversold ? color.green : color.blue, linewidth = 2)
+
+hline(70, "70", color = color.new(color.red, showFixed ? 60 : 100), linestyle = hline.style_dashed)
+hline(50, "50", color = color.new(color.gray, 70), linestyle = hline.style_dotted)
+hline(30, "30", color = color.new(color.green, showFixed ? 60 : 100), linestyle = hline.style_dashed)
+
+// ─── Alerts ────────────────────────────────────────────────────────────────
+alertcondition(ta.crossover(rsiValue, upper), "RSI above dynamic upper band", "{{ticker}} RSI above upper band")
+alertcondition(ta.crossunder(rsiValue, lower), "RSI below dynamic lower band", "{{ticker}} RSI below lower band")
