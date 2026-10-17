@@ -1,12 +1,16 @@
 # Nature Law Trading · Open-source code
 
-**The official open-source code space of the [Nature Law Trading](https://naturelawtrading.com)
-project.**
+> **The Open Source quantitative analysis tools of a large hedge fund. Made for private traders.**
+>
+> Built on the quantitative strategies you generate with StrategyQuant X and on the targeted use
+> of AI with Claude Opus — to improve your trading: your results and your Win Rate.
+
+This is the official open-source code space of the
+[Nature Law Trading](https://naturelawtrading.com) project.
 
 [English](#about-the-project) · [Italiano](#il-progetto)
 
-Indicators, strategies and quantitative tools from
-[naturelawtrading.com](https://naturelawtrading.com), organised by platform.
+Indicators, strategies and quantitative tools, organised by platform.
 
 | Folder | Platform | Contents |
 | --- | --- | --- |
@@ -20,10 +24,13 @@ rules, so results can be cross-checked.
 
 ## About the project
 
-This repository is where the [Nature Law Trading](https://naturelawtrading.com) project
-publishes its code. The tools, indicators and strategies discussed on
-[naturelawtrading.com](https://naturelawtrading.com) are released here so that anyone can read
-how they work, use them on their own charts and suggest improvements.
+Nature Law Trading brings the quantitative analysis tools of a large hedge fund to private
+traders. The approach starts from the quantitative strategies you generate with
+StrategyQuant X and adds a targeted use of AI with Claude Opus, with one goal: improving your
+trading, your results and your Win Rate.
+
+This repository is where the project publishes its code, so that anyone can read how the tools
+work, use them on their own charts and suggest improvements.
 
 - **Website**: [naturelawtrading.com](https://naturelawtrading.com) is the home of the project.
 - **Code**: this repository holds the open-source implementations, for TradingView, MetaTrader 5
@@ -33,11 +40,16 @@ how they work, use them on their own charts and suggest improvements.
 
 ## Il progetto
 
+> **Gli strumenti open source di analisi quantitativa di un grande hedge fund. Pensati per i
+> trader privati.**
+>
+> Basati sulle strategie quantitative che generi con StrategyQuant X e sull'uso mirato
+> dell'intelligenza artificiale con Claude Opus, per migliorare il tuo trading: i tuoi risultati
+> e il tuo Win Rate.
+
 Questo repository è lo spazio in cui il progetto
-[Nature Law Trading](https://naturelawtrading.com) pubblica il proprio codice. Gli strumenti,
-gli indicatori e le strategie di cui si parla su
-[naturelawtrading.com](https://naturelawtrading.com) vengono rilasciati qui, così chiunque può
-vedere come funzionano, usarli sui propri grafici e proporre miglioramenti.
+[Nature Law Trading](https://naturelawtrading.com) pubblica il proprio codice, così chiunque può
+vedere come funzionano gli strumenti, usarli sui propri grafici e proporre miglioramenti.
 
 - **Sito**: [naturelawtrading.com](https://naturelawtrading.com) è la casa del progetto.
 - **Codice**: questo repository contiene le implementazioni open source per TradingView,
@@ -102,6 +114,9 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 ## Licence and disclaimer
 
 Released under the [MIT License](LICENSE).
+
+StrategyQuant X and Claude are trademarks of their respective owners. They are mentioned only to
+describe the workflow this project uses; this project is not affiliated with or endorsed by them.
 
 This code is educational material, not financial advice. Trading involves substantial risk of
 loss. Backtest results do not guarantee future performance. Test everything on demo accounts
