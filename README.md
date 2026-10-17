@@ -1,7 +1,12 @@
 # Nature Law Trading · Open-source code
 
-Open-source quantitative tools from [naturelawtrading.com](https://naturelawtrading.com),
-organised by platform.
+**The official open-source code space of the [Nature Law Trading](https://naturelawtrading.com)
+project.**
+
+[English](#about-the-project) · [Italiano](#il-progetto)
+
+Indicators, strategies and quantitative tools from
+[naturelawtrading.com](https://naturelawtrading.com), organised by platform.
 
 | Folder | Platform | Contents |
 | --- | --- | --- |
@@ -12,6 +17,36 @@ organised by platform.
 The same ideas appear on each platform where it makes sense. For example, the SMA crossover
 exists as a Python example, a Pine Script strategy and an MQL5 Expert Advisor with the same
 rules, so results can be cross-checked.
+
+## About the project
+
+This repository is where the [Nature Law Trading](https://naturelawtrading.com) project
+publishes its code. The tools, indicators and strategies discussed on
+[naturelawtrading.com](https://naturelawtrading.com) are released here so that anyone can read
+how they work, use them on their own charts and suggest improvements.
+
+- **Website**: [naturelawtrading.com](https://naturelawtrading.com) is the home of the project.
+- **Code**: this repository holds the open-source implementations, for TradingView, MetaTrader 5
+  and Python.
+- **Questions and bug reports**: open an
+  [issue](https://github.com/stmastria-data/code/issues) on this repository.
+
+## Il progetto
+
+Questo repository è lo spazio in cui il progetto
+[Nature Law Trading](https://naturelawtrading.com) pubblica il proprio codice. Gli strumenti,
+gli indicatori e le strategie di cui si parla su
+[naturelawtrading.com](https://naturelawtrading.com) vengono rilasciati qui, così chiunque può
+vedere come funzionano, usarli sui propri grafici e proporre miglioramenti.
+
+- **Sito**: [naturelawtrading.com](https://naturelawtrading.com) è la casa del progetto.
+- **Codice**: questo repository contiene le implementazioni open source per TradingView,
+  MetaTrader 5 e Python.
+- **Domande e segnalazioni**: apri una
+  [issue](https://github.com/stmastria-data/code/issues) su questo repository.
+
+Il codice è rilasciato con licenza MIT. È materiale didattico e non costituisce consulenza
+finanziaria.
 
 ## Quick start
 
