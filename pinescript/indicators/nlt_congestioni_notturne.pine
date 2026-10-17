@@ -1,0 +1,939 @@
+// This Pine Script® code is subject to the terms of the MIT License
+// https://github.com/stmastria-data/code/blob/main/LICENSE
+// © Nature Law Trading — https://naturelawtrading.com
+//
+// Name:        Congestioni notturne e Aree di Tempo
+// Version:     3.1
+// Description: Night-session congestion range (20:00-06:00) drawn as Buy Zone (night high)
+//              and Sell Zone (night low), coloured trading-session backgrounds (Morning Hot
+//              Zone, European, American, London Close), night range label in pips/points,
+//              and small/medium doji detection with alerts.
+// Notes:       Hours are local to "Offset fuso orario" and assume an intraday chart whose
+//              bars open on the hour. Pip/point size is detected from the symbol or set
+//              manually in "Configurazione Strumento".
+
+//@version=6
+indicator("Congestioni notturne e Aree di Tempo v3.1", overlay=true, max_lines_count=200, max_labels_count=500)
+
+// ========================================================================
+// MODULO BASE SEMPLIFICATO - SISTEMA MODULARE
+// Versione 3.0 - Senza modulo Force Trend
+// Le Doji sono sempre visibili (rialziste e ribassiste simultaneamente)
+// ========================================================================
+
+// ========== VARIABILI GLOBALI PER MODULI ==========
+// Queste variabili sono utilizzate dai moduli aggiuntivi
+// NON MODIFICARE QUESTI NOMI
+
+// Instrument info
+string symbol = syminfo.ticker
+string description = syminfo.description
+var float final_multiplier = 0.0001
+var string final_inst_type = "FOREX"
+
+// Time variables
+var int gmtHour = 0
+var int gmtMinute = 0
+var int gmtDay = 0
+var int localHour = 0
+
+// Trading hours
+var bool is_trading_hours = true
+
+// Bar coloring priority system (i moduli useranno queste variabili)
+var color bar_color_priority_1 = na  // Massima priorità (es. schemi veloci)
+var color bar_color_priority_2 = na  // Media priorità (es. doji)
+var color bar_color_priority_3 = na  // Bassa priorità (es. night session)
+var color bar_color_priority_4 = na  // Minima priorità
+
+// Previous bar colors (per pattern che colorano barre precedenti)
+var color prev_bar_color_1 = na
+var color prev_bar_color_2 = na
+var color prev_bar_color_3 = na
+
+// Zone variables (per modulo Buy/Sell Zone)
+var float nightHigh = na
+var float nightLow = na
+var float currentBuyZone = na
+var float currentSellZone = na
+var bool collectingData = false
+var int lastDayZone = 0
+
+// Statistics arrays - Semplificati
+var float[] last_7_ranges = array.new_float(7, 0.0)
+var int days_counter = 0
+
+// Pattern counters (per statistiche)
+var int fast_patterns_small_long_count = 0
+var int fast_patterns_small_short_count = 0
+var int fast_patterns_long_count = 0
+var int fast_patterns_short_count = 0
+var int wide_patterns_long_count = 0
+var int wide_patterns_short_count = 0
+
+// ========== RILEVAMENTO AUTOMATICO STRUMENTO ==========
+get_instrument_info() =>
+    float pip_multiplier = 0.0001  // Default forex
+    string instrument_type = "FOREX"
+
+    // Rilevamento automatico basato sul simbolo
+    // CRYPTO
+    if str.contains(symbol, "BTC") or str.contains(description, "Bitcoin")
+        pip_multiplier := 1.0
+        instrument_type := "BTC"
+    else if str.contains(symbol, "ETH") or str.contains(description, "Ethereum")
+        pip_multiplier := 0.1
+        instrument_type := "ETH"
+    // METALLI
+    else if str.contains(symbol, "XAU") or str.contains(description, "Gold") or str.contains(description, "ORO")
+        pip_multiplier := 0.1
+        instrument_type := "GOLD"
+    else if str.contains(symbol, "XAG") or str.contains(description, "Silver") or str.contains(description, "ARGENTO")
+        pip_multiplier := 0.01
+        instrument_type := "SILVER"
+    // INDICI
+    else if str.contains(symbol, "DAX") or str.contains(symbol, "GER") or str.contains(description, "Germany")
+        pip_multiplier := 1.0
+        instrument_type := "DAX"
+    else if str.contains(symbol, "SPX") or str.contains(symbol, "SP500") or str.contains(symbol, "US500") or
+             str.contains(description, "S&P") or str.contains(description, "500")
+        pip_multiplier := 0.01
+        instrument_type := "SP500"
+    // FOREX
+    else if str.contains(symbol, "JPY")
+        pip_multiplier := 0.01
+        instrument_type := "FOREX_JPY"
+
+    [pip_multiplier, instrument_type]
+
+// Ottieni info strumento
+[pip_mult, inst_type] = get_instrument_info()
+
+// ========== SEZIONE INPUT CONFIGURAZIONE STRUMENTO ==========
+s_instrument_override = input.string("Auto", title="Tipo Strumento",
+     options=["Auto", "Forex Major", "Forex JPY", "Gold", "Silver", "DAX", "S&P 500", "Bitcoin", "Ethereum"],
+     group="Configurazione Strumento",
+     tooltip="'Auto' rileva automaticamente lo strumento")
+
+b_custom_multiplier = input.bool(false, title="Usa moltiplicatore personalizzato", group="Configurazione Strumento")
+f_custom_multiplier = input.float(0.0001, title="Moltiplicatore personalizzato",
+     minval=0.00001, maxval=10.0, step=0.00001, group="Configurazione Strumento")
+
+b_show_instrument_info = input.bool(true, title="Mostra info strumento", group="Configurazione Strumento")
+
+// Determina il moltiplicatore finale
+final_multiplier := pip_mult
+final_inst_type := inst_type
+
+if s_instrument_override != "Auto"
+    if s_instrument_override == "Forex Major"
+        final_multiplier := 0.0001
+        final_inst_type := "FOREX"
+    else if s_instrument_override == "Forex JPY"
+        final_multiplier := 0.01
+        final_inst_type := "FOREX_JPY"
+    else if s_instrument_override == "Gold"
+        final_multiplier := 0.1
+        final_inst_type := "GOLD"
+    else if s_instrument_override == "Silver"
+        final_multiplier := 0.01
+        final_inst_type := "SILVER"
+    else if s_instrument_override == "DAX"
+        final_multiplier := 1.0
+        final_inst_type := "DAX"
+    else if s_instrument_override == "S&P 500"
+        final_multiplier := 0.01
+        final_inst_type := "SP500"
+    else if s_instrument_override == "Bitcoin"
+        final_multiplier := 1.0
+        final_inst_type := "BTC"
+    else if s_instrument_override == "Ethereum"
+        final_multiplier := 0.1
+        final_inst_type := "ETH"
+
+if b_custom_multiplier
+    final_multiplier := f_custom_multiplier
+
+// ========== CONFIGURAZIONE TEMPO ==========
+i_time_offset = input.int(6, title="Offset fuso orario (ore)", minval=-12, maxval=12, group="Configurazione Tempo")
+
+// Calcolo ora locale
+getLocalHour() =>
+    (hour(time) + i_time_offset) % 24
+
+// Calcolo ora GMT
+gmtTime = time + i_time_offset * 60 * 60 * 1000
+gmtHour := hour(gmtTime)
+gmtMinute := minute(gmtTime)
+gmtDay := dayofweek(gmtTime)
+localHour := getLocalHour()
+
+// ========== CONFIGURAZIONE VISUALIZZAZIONE (per moduli) ==========
+// Queste variabili sono usate dai moduli per posizionamento etichette
+f_trend_text_offset = input.float(2.0, title="Offset testo trend (pips/punti)", minval=0.5, maxval=50.0, step=0.5, group="Configurazione Tempo")
+f_trend_text_offset_short = input.float(5.0, title="Offset testo SHORT (pips/punti)", minval=0.5, maxval=50.0, step=0.5, group="Configurazione Tempo")
+
+// ========== ORARI TRADING (per moduli pattern) ==========
+b_time_filter = input.bool(true, title="Limita visualizzazione a orari specifici", group="Orari Trading")
+i_trading_start = input.int(6, title="Ora inizio (0-23)", minval=0, maxval=23, group="Orari Trading")
+i_trading_end = input.int(20, title="Ora fine (0-23)", minval=0, maxval=23, group="Orari Trading")
+
+// ========== FUNZIONI UTILITY ==========
+get_unit_label() =>
+    string unit = ""
+    if final_inst_type == "FOREX" or final_inst_type == "FOREX_JPY"
+        unit := "p"
+    else if final_inst_type == "GOLD" or final_inst_type == "SILVER"
+        unit := "pt"
+    else if final_inst_type == "SP500" or final_inst_type == "DAX"
+        unit := "pt"
+    else if final_inst_type == "BTC"
+        unit := "$"
+    else if final_inst_type == "ETH"
+        unit := "$"
+    else
+        unit := "u"
+    unit
+
+// ========== GESTIONE TEMPO E ZONE ==========
+currentDay = dayofmonth(time)
+
+// Verifica ora trading
+if b_time_filter
+    int current_hour = (hour(time) + i_time_offset) % 24
+    is_trading_hours := current_hour >= i_trading_start and current_hour < i_trading_end
+else
+    is_trading_hours := true
+
+// ========== GESTIONE ZONE NOTTURNE (per modulo Buy/Sell Zone) ==========
+// Inizia raccolta alle 20:00
+if localHour == 20 and minute(time) == 0
+    nightHigh := high
+    nightLow := low
+    collectingData := true
+
+// Durante il periodo notturno (20:00 - 06:00)
+isNightTime = (localHour >= 20) or (localHour < 6)
+
+if isNightTime and collectingData
+    if not na(high) and (na(nightHigh) or high > nightHigh)
+        nightHigh := high
+
+    if not na(low) and (na(nightLow) or low < nightLow)
+        nightLow := low
+
+// Stop collecting at 6:00
+if localHour == 6 and minute(time) == 0 and currentDay != lastDayZone
+    if not na(nightHigh)
+        currentBuyZone := nightHigh
+    if not na(nightLow)
+        currentSellZone := nightLow
+
+    collectingData := false
+    lastDayZone := currentDay
+
+// ========== CALCOLO RANGE GIORNALIERO ==========
+// Manteniamo il calcolo del range per le statistiche
+float daily_range = 0.0
+if localHour == 20 and minute(time) == 0
+    float morning_high = high
+    float morning_low = low
+
+    // Cerca massimi e minimi del giorno
+    for i = 1 to 200
+        int adjusted_hour = (hour(time[i]) + i_time_offset) % 24
+        if adjusted_hour == 6 and minute(time[i]) == 0
+            // Calcola range dalle 6:00 alle 20:00
+            float max_high = high
+            float min_low = low
+
+            for j = 0 to i
+                if high[j] > max_high
+                    max_high := high[j]
+                if low[j] < min_low
+                    min_low := low[j]
+
+            daily_range := (max_high - min_low) / final_multiplier
+            break
+
+    // Aggiorna array range
+    array.unshift(last_7_ranges, daily_range)
+    if array.size(last_7_ranges) > 7
+        array.pop(last_7_ranges)
+
+// ========== TABELLE INFORMATIVE ==========
+// Info strumento
+if b_show_instrument_info and barstate.islast
+    var table info_table = table.new(position.middle_right, 2, 3, color.black, color.white, 1, color.gray, 1)
+
+    table.cell(info_table, 0, 0, "Strumento:", text_color=color.white, bgcolor=color.black)
+    table.cell(info_table, 1, 0, symbol, text_color=color.yellow, bgcolor=color.black)
+
+    table.cell(info_table, 0, 1, "Tipo rilevato:", text_color=color.white, bgcolor=color.black)
+    table.cell(info_table, 1, 1, final_inst_type, text_color=color.yellow, bgcolor=color.black)
+
+    table.cell(info_table, 0, 2, "Moltiplicatore:", text_color=color.white, bgcolor=color.black)
+    table.cell(info_table, 1, 2, str.tostring(final_multiplier, "#.#####"), text_color=color.yellow, bgcolor=color.black)
+
+// ========================================================================
+// FINE MODULO BASE SEMPLIFICATO
+// ========================================================================
+
+
+// ========================================================================
+// MODULO: BUY/SELL ZONES (Linee Orizzontali)
+// Dipendenze: nightHigh, nightLow, currentBuyZone, currentSellZone,
+//            localHour, collectingData, lastDayZone
+// Funzione: Traccia linee orizzontali per Buy Zone (massimo notturno) e
+//           Sell Zone (minimo notturno) alle 6:00
+// ========================================================================
+
+// ========== INPUT BUY/SELL ZONE ==========
+groupTitleZones = "Buy/Sell Zone"
+
+enable_buy_zone = input.bool(true, title="Abilita Buy Zone", group=groupTitleZones, tooltip="Calcola il massimo tra le 20:00 e le 06:00")
+buy_zone_color = input.color(color.blue, title="Colore Buy Zone", group=groupTitleZones)
+buy_zone_width = input.int(2, title="Spessore linea Buy Zone", minval=1, maxval=4, group=groupTitleZones)
+
+enable_sell_zone = input.bool(true, title="Abilita Sell Zone", group=groupTitleZones, tooltip="Calcola il minimo tra le 20:00 e le 06:00")
+sell_zone_color = input.color(color.red, title="Colore Sell Zone", group=groupTitleZones)
+sell_zone_width = input.int(2, title="Spessore linea Sell Zone", minval=1, maxval=4, group=groupTitleZones)
+
+show_zone_labels = input.bool(true, title="Mostra etichette zone", group=groupTitleZones)
+max_historical_zones = input.int(10, title="Numero massimo di zone storiche", minval=1, maxval=50, group=groupTitleZones)
+
+// ========== VARIABILI ZONE ==========
+// Array per le linee
+var line[] buyZoneLines = array.new_line()
+var line[] sellZoneLines = array.new_line()
+
+// Etichette
+var label buyZoneLabel = na
+var label sellZoneLabel = na
+
+// Variabile per tracciare se abbiamo già creato le zone oggi
+var int lastZoneCreationDay = 0
+
+// ========== CREAZIONE ZONE ALLE 6:00 ==========
+// Ottieni il giorno corrente
+currentDayZone = dayofmonth(time)
+
+// Le zone vengono create alle 6:00 basandosi sui valori raccolti durante la notte
+// Usa la stessa condizione del modulo base per sincronizzazione
+if localHour == 6 and minute(time) == 0 and currentDayZone != lastZoneCreationDay
+    // Aggiorna il giorno di creazione zone
+    lastZoneCreationDay := currentDayZone
+
+    // Verifica che abbiamo valori validi dalle variabili del modulo base
+    float zoneHigh = na(currentBuyZone) ? nightHigh : currentBuyZone
+    float zoneLow = na(currentSellZone) ? nightLow : currentSellZone
+
+    // Calcola coordinate temporali per le linee
+    // La linea parte da 10 ore fa (20:00 di ieri) e arriva a 14 ore avanti (20:00 di oggi)
+    int barsTo20Yesterday = math.round(600 / timeframe.multiplier)  // 10 ore
+    int barsTo20Today = math.round(840 / timeframe.multiplier)      // 14 ore
+
+    int startX = bar_index - barsTo20Yesterday
+    int endX = bar_index + barsTo20Today
+
+    // CREA BUY ZONE
+    if enable_buy_zone and not na(zoneHigh)
+        line buyLine = line.new(startX, zoneHigh, endX, zoneHigh)
+        line.set_color(buyLine, buy_zone_color)
+        line.set_width(buyLine, buy_zone_width)
+        line.set_style(buyLine, line.style_solid)
+
+        array.push(buyZoneLines, buyLine)
+
+        // Limita il numero di zone storiche
+        if array.size(buyZoneLines) > max_historical_zones
+            line oldLine = array.shift(buyZoneLines)
+            line.delete(oldLine)
+
+    // CREA SELL ZONE
+    if enable_sell_zone and not na(zoneLow)
+        line sellLine = line.new(startX, zoneLow, endX, zoneLow)
+        line.set_color(sellLine, sell_zone_color)
+        line.set_width(sellLine, sell_zone_width)
+        line.set_style(sellLine, line.style_solid)
+
+        array.push(sellZoneLines, sellLine)
+
+        // Limita il numero di zone storiche
+        if array.size(sellZoneLines) > max_historical_zones
+            line oldLine = array.shift(sellZoneLines)
+            line.delete(oldLine)
+
+// ========== ETICHETTE ZONE ==========
+// Mostra etichette durante il giorno (6:00 - 20:00)
+if show_zone_labels and localHour >= 6 and localHour < 20 and barstate.islast
+    // Usa i valori correnti delle zone
+    float displayBuyZone = na(currentBuyZone) ? nightHigh : currentBuyZone
+    float displaySellZone = na(currentSellZone) ? nightLow : currentSellZone
+
+    // Etichetta Buy Zone
+    if enable_buy_zone and not na(displayBuyZone)
+        if not na(buyZoneLabel)
+            label.delete(buyZoneLabel)
+
+        buyText = "Buy Zone: " + str.tostring(displayBuyZone, format.mintick)
+        buyZoneLabel := label.new(bar_index + 5, displayBuyZone, buyText,
+                                 style=label.style_label_left,
+                                 color=buy_zone_color,
+                                 textcolor=color.white,
+                                 size=size.small)
+
+    // Etichetta Sell Zone
+    if enable_sell_zone and not na(displaySellZone)
+        if not na(sellZoneLabel)
+            label.delete(sellZoneLabel)
+
+        sellText = "Sell Zone: " + str.tostring(displaySellZone, format.mintick)
+        sellZoneLabel := label.new(bar_index + 5, displaySellZone, sellText,
+                                  style=label.style_label_left,
+                                  color=sell_zone_color,
+                                  textcolor=color.white,
+                                  size=size.small)
+
+// ========================================================================
+// FINE MODULO BUY/SELL ZONES
+// ========================================================================
+
+
+// ========================================================================
+// MODULO: TRADING SESSIONS (Aree Temporali)
+// Dipendenze: gmtHour, gmtMinute, i_time_offset
+// Funzione: Visualizza le diverse sessioni di trading con sfondi colorati
+//           Morning Hot Zone, European Session, American Session, London Close
+// ========================================================================
+
+// ========== MORNING HOT ZONE ==========
+groupTitleMorning = "Morning Hot Zone"
+
+showMorningHotZone = input.bool(true, title="Enable Morning Hot Zone", group=groupTitleMorning)
+startHourMorning = input.int(6, title="Start Hour", group=groupTitleMorning)
+startMinuteMorning = input.int(0, title="Start Minute", group=groupTitleMorning)
+endHourMorning = input.int(7, title="End Hour", group=groupTitleMorning)
+endMinuteMorning = input.int(59, title="End Minute", group=groupTitleMorning)
+
+colorMorning = input.color(color.blue, title="Morning Hot Zone Color", group=groupTitleMorning)
+opacityMorning = input.int(50, title="Morning Hot Zone Opacity", minval=0, maxval=100, group=groupTitleMorning)
+
+// ========== EUROPEAN TRADING SESSION ==========
+groupTitleEuropean = "European Trading Session"
+
+enableEuropeanSession = input.bool(true, title="Enable European Trading Session", group=groupTitleEuropean)
+europe_open_hour = input.int(8, title="European Session Start Hour", group=groupTitleEuropean)
+europe_open_minute = input.int(0, title="European Session Start Minute", group=groupTitleEuropean)
+europe_close_hour = input.int(12, title="European Session End Hour", group=groupTitleEuropean)
+europe_close_minute = input.int(0, title="European Session End Minute", group=groupTitleEuropean)
+europe_color = input.color(color.new(color.blue, 64), title="European Session Color", group=groupTitleEuropean)
+opacityEuropean = input.int(60, title="European Session Opacity", minval=0, maxval=100, group=groupTitleEuropean)
+
+// ========== AMERICAN TRADING SESSION ==========
+groupTitleAmerican = "American Trading Session"
+
+enableAmericanSession = input.bool(true, title="Enable American Trading Session", group=groupTitleAmerican)
+us_open_hour = input.int(12, title="American Session Start Hour", group=groupTitleAmerican)
+us_open_minute = input.int(1, title="American Session Start Minute", group=groupTitleAmerican)
+us_close_hour = input.int(16, title="American Session End Hour", group=groupTitleAmerican)
+us_close_minute = input.int(59, title="American Session End Minute", group=groupTitleAmerican)
+us_color = input.color(color.new(color.blue, 80), title="American Session Color", group=groupTitleAmerican)
+opacityAmerican = input.int(70, title="American Session Opacity", minval=0, maxval=100, group=groupTitleAmerican)
+
+// ========== LONDON CLOSE AREA ==========
+groupTitleLondonClose = "London Close Area"
+
+enableLondonCloseArea = input.bool(true, title="Enable London Close Area", group=groupTitleLondonClose)
+startHourLondonClose = input.int(17, title="Start Hour", group=groupTitleLondonClose)
+startMinuteLondonClose = input.int(0, title="Start Minute", group=groupTitleLondonClose)
+endHourLondonClose = input.int(20, title="End Hour", group=groupTitleLondonClose)
+endMinuteLondonClose = input.int(0, title="End Minute", group=groupTitleLondonClose)
+colorLondonClose = input.color(color.blue, title="London Close Area Color", group=groupTitleLondonClose)
+opacityLondonClose = input.int(60, title="London Close Area Opacity", minval=0, maxval=100, group=groupTitleLondonClose)
+
+// ========== IDENTIFICAZIONE SESSIONI ==========
+
+// Morning Hot Zone - Basata su GMT
+isTargetHourMorning = (gmtHour > startHourMorning or (gmtHour == startHourMorning and gmtMinute >= startMinuteMorning)) and (gmtHour < endHourMorning or (gmtHour == endHourMorning and gmtMinute <= endMinuteMorning))
+
+// European Session - Usa timezone Europe/Rome
+europe_open_time = timestamp("Europe/Rome", year, month, dayofmonth, europe_open_hour, europe_open_minute)
+europe_close_time = timestamp("Europe/Rome", year, month, dayofmonth, europe_close_hour, europe_close_minute)
+is_europe_session = (time >= europe_open_time and time <= europe_close_time) and enableEuropeanSession
+
+// American Session - Usa timezone America/New_York con offset
+us_open_time = timestamp("America/New_York", year, month, dayofmonth, us_open_hour, us_open_minute) - (i_time_offset * 60 * 60 * 1000)
+us_close_time = timestamp("America/New_York", year, month, dayofmonth, us_close_hour, us_close_minute) - (i_time_offset * 60 * 60 * 1000)
+is_us_session = (time >= us_open_time and time <= us_close_time) and enableAmericanSession
+
+// London Close - Basata su GMT
+isTargetHourLondonClose = (gmtHour > startHourLondonClose or (gmtHour == startHourLondonClose and gmtMinute >= startMinuteLondonClose)) and (gmtHour < endHourLondonClose or (gmtHour == endHourLondonClose and gmtMinute <= endMinuteLondonClose))
+
+// ========== APPLICAZIONE SFONDI SESSIONI ==========
+// Gli sfondi vengono applicati in ordine di priorità visiva
+// Nota: questi bgcolor() si sovrappongono, l'ultimo applicato ha la precedenza visiva
+
+// Morning Hot Zone (seconda priorità)
+bgcolor(showMorningHotZone and isTargetHourMorning ? color.new(colorMorning, opacityMorning) : na)
+
+// European Session (terza priorità)
+bgcolor(is_europe_session ? color.new(europe_color, opacityEuropean) : na)
+
+// American Session (quarta priorità)
+bgcolor(is_us_session ? color.new(us_color, opacityAmerican) : na)
+
+// London Close (quinta priorità - più alta tra le sessioni diurne)
+bgcolor(isTargetHourLondonClose and enableLondonCloseArea ? color.new(colorLondonClose, opacityLondonClose) : na)
+
+// ========== TABELLA INFORMATIVA SESSIONI ==========
+// Input per mostrare/nascondere la tabella
+b_show_sessions_table = input.bool(false, title="Mostra tabella sessioni", group=groupTitleMorning)
+
+// Mostra lo stato corrente delle sessioni
+if barstate.islast and b_show_sessions_table
+    var table sessions_table = table.new(position.middle_left, 2, 5)
+
+    // Header
+    table.cell(sessions_table, 0, 0, "Trading Sessions", text_color=color.white, bgcolor=color.black, text_halign=text.align_center)
+    table.cell(sessions_table, 1, 0, "Status", text_color=color.white, bgcolor=color.black, text_halign=text.align_center)
+
+    // Morning Hot Zone
+    table.cell(sessions_table, 0, 1, "Morning HZ:", text_color=color.white, bgcolor=color.gray)
+    morning_status = showMorningHotZone and isTargetHourMorning ? "ACTIVE" : "Inactive"
+    morning_color = showMorningHotZone and isTargetHourMorning ? color.lime : color.gray
+    table.cell(sessions_table, 1, 1, morning_status, text_color=morning_color, bgcolor=color.gray)
+
+    // European Session
+    table.cell(sessions_table, 0, 2, "European:", text_color=color.white, bgcolor=color.gray)
+    europe_status = is_europe_session ? "ACTIVE" : "Inactive"
+    europe_status_color = is_europe_session ? color.lime : color.gray
+    table.cell(sessions_table, 1, 2, europe_status, text_color=europe_status_color, bgcolor=color.gray)
+
+    // American Session
+    table.cell(sessions_table, 0, 3, "American:", text_color=color.white, bgcolor=color.gray)
+    us_status = is_us_session ? "ACTIVE" : "Inactive"
+    us_status_color = is_us_session ? color.lime : color.gray
+    table.cell(sessions_table, 1, 3, us_status, text_color=us_status_color, bgcolor=color.gray)
+
+    // London Close
+    table.cell(sessions_table, 0, 4, "London Close:", text_color=color.white, bgcolor=color.gray)
+    london_status = enableLondonCloseArea and isTargetHourLondonClose ? "ACTIVE" : "Inactive"
+    london_color = enableLondonCloseArea and isTargetHourLondonClose ? color.lime : color.gray
+    table.cell(sessions_table, 1, 4, london_status, text_color=london_color, bgcolor=color.gray)
+
+// ========================================================================
+// FINE MODULO TRADING SESSIONS
+// ========================================================================
+
+
+// ========================================================================
+// MODULO: NIGHT LOW LIQUIDITY - VERSIONE CORRETTA
+// Colora SOLO le barre notturne (20:00-06:00)
+// Le barre diurne rimangono con colore naturale
+// ========================================================================
+
+// ========== INPUT NIGHT LOW LIQUIDITY ==========
+groupTitleNight = "Night Low Liquidity"
+
+startHourNight = input.int(20, title="Start Hour", group=groupTitleNight)
+startMinuteNight = input.int(1, title="Start Minute", group=groupTitleNight)
+endHourNight = input.int(5, title="End Hour", group=groupTitleNight)
+endMinuteNight = input.int(59, title="End Minute", group=groupTitleNight)
+
+colorNight = input.color(color.white, title="Night Low Liquidity Color", group=groupTitleNight)
+opacityNight = input.int(90, title="Night Low Liquidity Opacity", minval=0, maxval=100, group=groupTitleNight)
+showPipLabel = input.bool(true, title="Show Night Low Liquidity Pip Label", group=groupTitleNight)
+b_color_bars_night = input.bool(true, title="Colora barre durante Night Session", group=groupTitleNight)
+b_show_night_background = input.bool(true, title="Mostra sfondo notturno", group=groupTitleNight)
+
+// ========== VARIABILI NIGHT SESSION ==========
+var float sessionLowNight = na
+var float sessionHighNight = na
+var float finalLowNight = na
+var float finalHighNight = na
+var bool sessionActiveNight = false
+
+// ========== IDENTIFICAZIONE SESSIONE NOTTURNA ==========
+// Usa l'ora locale dal modulo base (variabile globale)
+int current_minute = minute(time)
+
+// Verifica se siamo nell'orario notturno (20:00 - 06:00)
+bool isNightSession = false
+
+// Gestione corretta per orari che attraversano la mezzanotte
+if startHourNight > endHourNight  // Es: 20:00 - 06:00 (attraversa mezzanotte)
+    isNightSession := (localHour > startHourNight or
+                      (localHour == startHourNight and current_minute >= startMinuteNight)) or
+                     (localHour < endHourNight or
+                      (localHour == endHourNight and current_minute <= endMinuteNight))
+else  // Caso normale (non attraversa mezzanotte)
+    isNightSession := (localHour > startHourNight or
+                      (localHour == startHourNight and current_minute >= startMinuteNight)) and
+                     (localHour < endHourNight or
+                      (localHour == endHourNight and current_minute <= endMinuteNight))
+
+// ========== CALCOLO RANGE SESSIONE NOTTURNA ==========
+if isNightSession
+    // Inizio nuova sessione
+    if not sessionActiveNight
+        sessionLowNight := low
+        sessionHighNight := high
+        sessionActiveNight := true
+    // Aggiorna massimi e minimi della sessione
+    if not na(low) and (na(sessionLowNight) or low < sessionLowNight)
+        sessionLowNight := low
+    if not na(high) and (na(sessionHighNight) or high > sessionHighNight)
+        sessionHighNight := high
+else
+    // Fine sessione - salva i valori finali
+    if sessionActiveNight
+        finalLowNight := sessionLowNight
+        finalHighNight := sessionHighNight
+        sessionActiveNight := false
+
+// ========== CALCOLO E VISUALIZZAZIONE PIP RANGE ==========
+// Calcolo pip range
+var float amplitudePips = na
+var label nightRangeLabel = na
+
+// Rimuovi label precedente se esiste
+if not na(nightRangeLabel)
+    label.delete(nightRangeLabel)
+    nightRangeLabel := na
+
+if not na(finalLowNight) and not na(finalHighNight)
+    amplitudePips := (finalHighNight - finalLowNight) / final_multiplier
+
+// Determina colore label basato su variazione pip
+color amplitudeLabelColor = na
+if not na(amplitudePips)
+    amplitudeLabelColor := amplitudePips <= 25 ? color.green : color.red
+
+// Mostra pip label alla fine della sessione notturna (alle 6:00)
+if showPipLabel and not isNightSession and sessionActiveNight[1] and not na(amplitudePips)
+    // Determina unità di misura
+    string unit = ""
+    if final_inst_type == "FOREX" or final_inst_type == "FOREX_JPY"
+        unit := "p"
+    else if final_inst_type == "GOLD" or final_inst_type == "SILVER"
+        unit := "pt"
+    else if final_inst_type == "SP500" or final_inst_type == "DAX"
+        unit := "pt"
+    else if final_inst_type == "BTC"
+        unit := "$"
+    else if final_inst_type == "ETH"
+        unit := "$"
+    else
+        unit := "u"
+
+    // Formatta il valore in base al tipo di strumento
+    string pip_text = ""
+    if final_inst_type == "BTC"
+        pip_text := str.tostring(math.round(amplitudePips)) + " " + unit
+    else if final_inst_type == "ETH"
+        pip_text := str.tostring(math.round(amplitudePips * 0.1, 1)) + " " + unit
+    else
+        pip_text := str.tostring(math.round(amplitudePips, 1)) + " " + unit
+
+    // Crea label con il range
+    nightRangeLabel := label.new(bar_index, finalHighNight + (10 * final_multiplier),
+              text="Night: " + pip_text,
+              style=label.style_label_down,
+              color=amplitudeLabelColor,
+              textcolor=color.white,
+              size=size.normal)
+
+    // Reset variabili per prossima sessione
+    finalLowNight := na
+    finalHighNight := na
+    amplitudePips := na
+
+// ========== COLORAZIONE BARRE NOTTURNE ==========
+// IMPORTANTE: Colora SOLO le barre durante la sessione notturna
+// Non toccare le barre diurne (rimangono colore naturale)
+if b_color_bars_night and isNightSession
+    // Usa priorità 4 (bassa) - verrà sovrascritta da doji se presenti
+    // Ma SOLO se siamo effettivamente in sessione notturna
+    bar_color_priority_4 := colorNight
+
+// ========== BACKGROUND SESSIONE NOTTURNA ==========
+// Applica sfondo alla sessione notturna (opzionale)
+// NOTA: bgcolor deve essere al livello principale, non dentro un if
+bgcolor(b_show_night_background and isNightSession ? color.new(colorNight, opacityNight) : na)
+
+// ========================================================================
+// FINE MODULO NIGHT LOW LIQUIDITY CORRETTO
+// ========================================================================
+
+
+// ========================================================================
+// MODULO: DOJI DETECTION - VERSIONE SEMPLIFICATA
+// Mostra sempre sia doji rialziste che ribassiste
+// Rialziste (Long) in GIALLO, Ribassiste (Short) in BIANCO
+// ========================================================================
+
+// ========== CONTROLLI DOJI PICCOLE ==========
+groupTitleDojiSmall = "Controlli Doji Piccole"
+
+f_doji_body_small = input.float(1.0,
+     title="Distanza fra Apertura e Chiusura (pips/punti)", minval=0.1, group=groupTitleDojiSmall)
+f_high_proximity_small = input.float(1.0,
+     title="Posizione apertura/chiusura (pips/punti)", minval=0.1, group=groupTitleDojiSmall)
+f_min_shadow_small = input.float(3.0,
+     title="Range Ombra (pips/punti)", minval=1.0, group=groupTitleDojiSmall)
+f_max_range_small = input.float(10.0,
+     title="Range Totale Massimo (pips/punti)", minval=1.0, group=groupTitleDojiSmall)
+b_enable_max_range_small = input.bool(true, title="Abilita filtro range massimo", group=groupTitleDojiSmall)
+
+// ========== CONTROLLI DOJI MEDIE ==========
+groupTitleDojiMedium = "Controlli Doji Medie"
+
+b_enable_medium_doji = input.bool(true, title="Abilita Doji Medie", group=groupTitleDojiMedium)
+f_doji_body_medium = input.float(2.0,
+     title="Distanza fra Apertura e Chiusura (pips/punti)", minval=0.1, group=groupTitleDojiMedium)
+f_high_proximity_medium = input.float(2.0,
+     title="Posizione apertura/chiusura (pips/punti)", minval=0.1, group=groupTitleDojiMedium)
+f_min_shadow_medium = input.float(5.0,
+     title="Range Ombra (pips/punti)", minval=1.0, group=groupTitleDojiMedium)
+f_max_range_medium = input.float(15.0,
+     title="Range Totale Massimo (pips/punti)", minval=1.0, group=groupTitleDojiMedium)
+b_enable_max_range_medium = input.bool(true, title="Abilita filtro range massimo", group=groupTitleDojiMedium)
+
+// ========== FILTRO INSIDE BAR ==========
+groupTitleDojiCommon = "Controlli Doji Comuni"
+
+b_inside_filter = input.bool(false, title="Esclusione Doji inside", group=groupTitleDojiCommon)
+i_inside_lookback = input.int(3, title="Numero di barre precedenti da controllare", minval=1, maxval=10, group=groupTitleDojiCommon)
+
+// Controllo orario doji
+i_doji_start_hour = input.int(6, title="Ora inizio visualizzazione Doji", minval=0, maxval=23, group=groupTitleDojiCommon,
+     tooltip="Le doji sono visibili solo in questo range orario")
+i_doji_end_hour = input.int(20, title="Ora fine visualizzazione Doji", minval=0, maxval=23, group=groupTitleDojiCommon,
+     tooltip="Dopo quest'ora le doji non vengono mostrate (barre notturne)")
+b_force_day_only = input.bool(true, title="Doji solo durante il giorno", group=groupTitleDojiCommon,
+     tooltip="Se attivo, le doji non vengono mai mostrate durante la sessione notturna")
+
+// ========== COLORI DOJI - MODIFICATI ==========
+color_doji_long = input.color(color.yellow, title="Colore Doji Rialziste (Long)", group="Colori Doji")
+color_doji_short = input.color(color.white, title="Colore Doji Ribassiste (Short)", group="Colori Doji")
+b_show_doji_table = input.bool(false, title="Mostra tabella statistiche Doji", group="Colori Doji")
+
+// ========== VARIABILI DOJI ==========
+var int doji_small_long_count = 0
+var int doji_small_short_count = 0
+var int doji_medium_long_count = 0
+var int doji_medium_short_count = 0
+
+// ========== CALCOLO DIMENSIONI BARRA ==========
+float body_size = math.abs(open - close)
+float bar_range = high - low
+
+// ========== IDENTIFICAZIONE DOJI PICCOLE ==========
+// Calcolo soglie per doji piccole
+float body_threshold_small = f_doji_body_small * final_multiplier
+bool is_small_body_small = body_size <= body_threshold_small
+
+float max_range_threshold_small = f_max_range_small * final_multiplier
+bool is_within_range_small = not b_enable_max_range_small or bar_range <= max_range_threshold_small
+
+// Prossimità agli estremi per doji piccole
+float open_to_high = high - open
+float close_to_high = high - close
+float min_distance_to_high = math.min(open_to_high, close_to_high)
+float proximity_threshold_small = f_high_proximity_small * final_multiplier
+bool is_near_high_small = min_distance_to_high <= proximity_threshold_small
+
+float open_to_low = open - low
+float close_to_low = close - low
+float min_distance_to_low = math.min(open_to_low, close_to_low)
+bool is_near_low_small = min_distance_to_low <= proximity_threshold_small
+
+// Ombre per doji piccole
+float lower_point = math.min(open, close)
+float lower_shadow = lower_point - low
+float shadow_threshold_small = f_min_shadow_small * final_multiplier
+bool has_long_lower_shadow_small = lower_shadow >= shadow_threshold_small
+
+float upper_point = math.max(open, close)
+float upper_shadow = high - upper_point
+bool has_long_upper_shadow_small = upper_shadow >= shadow_threshold_small
+
+// Validazione doji piccole
+bool is_valid_long_doji_small = is_small_body_small and is_near_high_small and has_long_lower_shadow_small and is_within_range_small
+bool is_valid_short_doji_small = is_small_body_small and is_near_low_small and has_long_upper_shadow_small and is_within_range_small
+
+// ========== IDENTIFICAZIONE DOJI MEDIE ==========
+// Calcolo soglie per doji medie
+float body_threshold_medium = f_doji_body_medium * final_multiplier
+bool is_small_body_medium = body_size <= body_threshold_medium
+
+float max_range_threshold_medium = f_max_range_medium * final_multiplier
+bool is_within_range_medium = not b_enable_max_range_medium or bar_range <= max_range_threshold_medium
+
+// Prossimità agli estremi per doji medie
+float proximity_threshold_medium = f_high_proximity_medium * final_multiplier
+bool is_near_high_medium = min_distance_to_high <= proximity_threshold_medium
+bool is_near_low_medium = min_distance_to_low <= proximity_threshold_medium
+
+// Ombre per doji medie
+float shadow_threshold_medium = f_min_shadow_medium * final_multiplier
+bool has_long_lower_shadow_medium = lower_shadow >= shadow_threshold_medium
+bool has_long_upper_shadow_medium = upper_shadow >= shadow_threshold_medium
+
+// Validazione doji medie
+bool is_valid_long_doji_medium = b_enable_medium_doji and is_small_body_medium and is_near_high_medium and has_long_lower_shadow_medium and is_within_range_medium
+bool is_valid_short_doji_medium = b_enable_medium_doji and is_small_body_medium and is_near_low_medium and has_long_upper_shadow_medium and is_within_range_medium
+
+// ========== PRIORITÀ DOJI ==========
+// Le doji piccole hanno priorità sulle medie
+if is_valid_long_doji_small or is_valid_short_doji_small
+    is_valid_long_doji_medium := false
+    is_valid_short_doji_medium := false
+
+// ========== FILTRO INSIDE BAR ==========
+bool is_inside_bar = false
+if b_inside_filter
+    float prev_bars_high = high[1]
+    float prev_bars_low = low[1]
+
+    for i = 2 to i_inside_lookback
+        prev_bars_high := math.max(prev_bars_high, high[i])
+        prev_bars_low := math.min(prev_bars_low, low[i])
+
+    is_inside_bar := high <= prev_bars_high and low >= prev_bars_low
+
+// ========== CONTROLLO ORARIO PER LE DOJI ==========
+// Verifica se siamo nell'orario consentito per le doji
+bool is_in_doji_hours = false
+if b_force_day_only
+    // Modalità forzata: solo durante il giorno (configurabile)
+    is_in_doji_hours := localHour >= i_doji_start_hour and localHour < i_doji_end_hour
+else
+    // Modalità libera: sempre visibili (se l'utente lo desidera)
+    is_in_doji_hours := true
+
+// ========== DECISIONE FINALE MOSTRARE DOJI ==========
+// VERSIONE SEMPLIFICATA: Mostra sempre entrambi i tipi di doji
+bool show_doji = is_trading_hours and is_in_doji_hours and (not b_inside_filter or not is_inside_bar)
+
+// Determina quali doji mostrare
+bool show_long_doji_small = show_doji and is_valid_long_doji_small
+bool show_short_doji_small = show_doji and is_valid_short_doji_small
+bool show_long_doji_medium = show_doji and is_valid_long_doji_medium
+bool show_short_doji_medium = show_doji and is_valid_short_doji_medium
+
+// ========== CONTATORI STATISTICHE ==========
+if show_long_doji_small
+    doji_small_long_count += 1
+
+if show_short_doji_small
+    doji_small_short_count += 1
+
+if show_long_doji_medium
+    doji_medium_long_count += 1
+
+if show_short_doji_medium
+    doji_medium_short_count += 1
+
+// ========== COLORAZIONE BARRE DOJI ==========
+// Le doji hanno priorità 2 (alta) - sovrascrivono le barre notturne ma non i pattern veloci
+// Doji LONG (rialziste) = GIALLO
+// Doji SHORT (ribassiste) = BIANCO
+
+if show_long_doji_small or show_long_doji_medium
+    bar_color_priority_2 := color_doji_long  // Giallo per doji rialziste
+else if show_short_doji_small or show_short_doji_medium
+    bar_color_priority_2 := color_doji_short  // Bianco per doji ribassiste
+
+// ========== TABELLA STATISTICHE DOJI ==========
+if barstate.islast and b_show_doji_table
+    var table doji_table = table.new(position.bottom_center, 3, 4)
+
+    // Header
+    table.cell(doji_table, 0, 0, "Doji Stats", text_color=color.white, bgcolor=color.black, text_halign=text.align_center)
+    table.cell(doji_table, 1, 0, "Rialziste", text_color=color.yellow, bgcolor=color.black, text_halign=text.align_center)
+    table.cell(doji_table, 2, 0, "Ribassiste", text_color=color.white, bgcolor=color.black, text_halign=text.align_center)
+
+    // Doji Piccole
+    table.cell(doji_table, 0, 1, "Piccole:", text_color=color.white, bgcolor=color.gray)
+    table.cell(doji_table, 1, 1, str.tostring(doji_small_long_count), text_color=color.yellow, bgcolor=color.gray)
+    table.cell(doji_table, 2, 1, str.tostring(doji_small_short_count), text_color=color.white, bgcolor=color.gray)
+
+    // Doji Medie
+    table.cell(doji_table, 0, 2, "Medie:", text_color=color.white, bgcolor=color.gray)
+    table.cell(doji_table, 1, 2, str.tostring(doji_medium_long_count), text_color=color.yellow, bgcolor=color.gray)
+    table.cell(doji_table, 2, 2, str.tostring(doji_medium_short_count), text_color=color.white, bgcolor=color.gray)
+
+    // Totali
+    int total_long = doji_small_long_count + doji_medium_long_count
+    int total_short = doji_small_short_count + doji_medium_short_count
+    table.cell(doji_table, 0, 3, "Totale:", text_color=color.white, bgcolor=color.black)
+    table.cell(doji_table, 1, 3, str.tostring(total_long), text_color=color.yellow, bgcolor=color.black)
+    table.cell(doji_table, 2, 3, str.tostring(total_short), text_color=color.white, bgcolor=color.black)
+
+// ========== ALERT DOJI ==========
+alertcondition(show_long_doji_small,
+               title="Doji Piccola Rialzista",
+               message="Identificata Doji Piccola Rialzista (ore diurne)!")
+
+alertcondition(show_short_doji_small,
+               title="Doji Piccola Ribassista",
+               message="Identificata Doji Piccola Ribassista (ore diurne)!")
+
+alertcondition(show_long_doji_medium,
+               title="Doji Media Rialzista",
+               message="Identificata Doji Media Rialzista (ore diurne)!")
+
+alertcondition(show_short_doji_medium,
+               title="Doji Media Ribassista",
+               message="Identificata Doji Media Ribassista (ore diurne)!")
+
+// ========================================================================
+// FINE MODULO DOJI DETECTION SEMPLIFICATO
+// ========================================================================
+
+
+// ========================================================================
+// MODULO: FINAL COLORING - VERSIONE CORRETTA
+// IMPORTANTE: Questo modulo DEVE essere l'ULTIMO modulo caricato!
+// Applica i colori delle barre secondo il sistema di priorità
+// ========================================================================
+
+// ========== APPLICAZIONE FINALE DEI COLORI ==========
+// Determina il colore finale basato sulle priorità impostate dai moduli
+
+color final_bar_color = na
+
+// Applica colori in ordine di priorità (1 = massima, 4 = minima)
+if not na(bar_color_priority_1)
+    final_bar_color := bar_color_priority_1
+else if not na(bar_color_priority_2)
+    final_bar_color := bar_color_priority_2
+else if not na(bar_color_priority_3)
+    final_bar_color := bar_color_priority_3
+else if not na(bar_color_priority_4)
+    final_bar_color := bar_color_priority_4
+
+// Colora la barra corrente (deve essere al livello principale)
+barcolor(final_bar_color)
+
+// Colora le barre precedenti (devono essere al livello principale)
+barcolor(prev_bar_color_1, offset = -1)
+barcolor(prev_bar_color_2, offset = -2)
+barcolor(prev_bar_color_3, offset = -3)
+
+// ========== RESET VARIABILI PER IL PROSSIMO CALCOLO ==========
+// Reset SEMPRE alla fine per preparare il prossimo calcolo
+bar_color_priority_1 := na
+bar_color_priority_2 := na
+bar_color_priority_3 := na
+bar_color_priority_4 := na
+prev_bar_color_1 := na
+prev_bar_color_2 := na
+prev_bar_color_3 := na
+
+// ========================================================================
+// FINE MODULO FINAL COLORING
+// Nessun altro modulo deve essere aggiunto dopo questo!
+// ========================================================================

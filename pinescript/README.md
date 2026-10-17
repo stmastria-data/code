@@ -14,6 +14,7 @@ Indicators, strategies and libraries for [TradingView](https://www.tradingview.c
 
 | File | Type | What it does |
 | --- | --- | --- |
+| `indicators/nlt_congestioni_notturne.pine` | Indicator | Night congestion range as Buy/Sell Zones, trading-session backgrounds, night range label and doji detection (v3.1, in use on TradingView) |
 | `indicators/nlt_rsi_bands.pine` | Indicator | RSI with overbought/oversold bands that adapt to recent RSI behaviour |
 | `indicators/nlt_volatility_regime.pine` | Indicator | Annualised realised volatility and its percentile rank as low/normal/high regime |
 | `strategies/nlt_sma_crossover.pine` | Strategy | Fast/slow SMA crossover with ATR stop; same rules as the Python example |
